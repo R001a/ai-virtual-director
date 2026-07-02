@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useRef, useState } from 'react';
+import React, { useMemo, useRef, useState } from 'react';
 
 const cos = 'https://rock-1392994282.cos.ap-shanghai.myqcloud.com/AI%E4%BA%BA%E7%89%A9%E8%B5%84%E4%BA%A7%E5%BA%93';
 const workflowUrl = 'https://aeye.bytedance.net/flow?id=6a3ca66f4631de0045ef6263';
@@ -126,54 +126,7 @@ function FaceOption({ item, active, color, disabled = false, onClick, onPreview,
   );
 }
 
-function WorkflowPage({ onBack }) {
-  return (
-    <div className="min-h-screen bg-[#0a0a0c] px-4 py-10 text-zinc-300 sm:px-8">
-      <div className="mx-auto flex min-h-[calc(100vh-5rem)] w-full max-w-[960px] flex-col justify-center">
-        <button
-          type="button"
-          onClick={onBack}
-          className="mb-8 w-fit rounded-md border border-zinc-800 bg-zinc-950 px-4 py-2 text-sm font-semibold text-zinc-400 transition hover:border-cyan-500 hover:text-cyan-300"
-        >
-          返回配置器
-        </button>
-
-        <section className="rounded-2xl border border-zinc-800/70 bg-[#13151a] p-8 shadow-2xl sm:p-12">
-          <p className="font-mono text-xs uppercase tracking-[0.28em] text-cyan-400">AI Virtual Director</p>
-          <h1 className="mt-4 text-3xl font-black tracking-tight text-zinc-100 sm:text-5xl">生图工作流入口</h1>
-          <p className="mt-5 max-w-2xl text-base leading-7 text-zinc-400">
-            当前配置器已经生成提示词与 Reference Input Chain。进入工作流页面后，可以继续完成生图流程。
-          </p>
-
-          <div className="mt-10 flex flex-wrap gap-4">
-            <a
-              href={workflowUrl}
-              target="_blank"
-              rel="noreferrer"
-              className="rounded-full bg-gradient-to-r from-cyan-500 to-indigo-500 px-8 py-3 text-sm font-black text-white shadow-xl shadow-cyan-900/40 transition hover:scale-[1.02]"
-            >
-              打开工作流
-            </a>
-            <button
-              type="button"
-              onClick={() => navigator.clipboard?.writeText(workflowUrl)}
-              className="rounded-full border border-zinc-700 px-8 py-3 text-sm font-bold text-zinc-300 transition hover:border-cyan-500 hover:text-cyan-300"
-            >
-              复制工作流链接
-            </button>
-          </div>
-
-          <div className="mt-8 rounded-xl border border-zinc-800 bg-zinc-950/60 p-4 font-mono text-xs leading-6 text-zinc-500">
-            {workflowUrl}
-          </div>
-        </section>
-      </div>
-    </div>
-  );
-}
-
 export default function App() {
-  const [route, setRoute] = useState(() => window.location.hash === '#/workflow' ? 'workflow' : 'home');
   const [config, setConfig] = useState({
     gender: 'female',
     model: null,
@@ -194,15 +147,6 @@ export default function App() {
   const [hoverPreview, setHoverPreview] = useState(null);
   const [posePanelOpen, setPosePanelOpen] = useState(false);
   const hoverTimer = useRef(null);
-
-  useEffect(() => {
-    const handleHashChange = () => {
-      setRoute(window.location.hash === '#/workflow' ? 'workflow' : 'home');
-    };
-
-    window.addEventListener('hashchange', handleHashChange);
-    return () => window.removeEventListener('hashchange', handleHashChange);
-  }, []);
 
   const updateConfig = (key, value) => setConfig(prev => ({ ...prev, [key]: value }));
 
@@ -319,13 +263,6 @@ export default function App() {
     return { main, chain };
 
   }, [config]);
-
-  if (route === 'workflow') {
-    return <WorkflowPage onBack={() => {
-      window.location.hash = '';
-      setRoute('home');
-    }} />;
-  }
 
   return (
     <div className="min-h-screen bg-[#0a0a0c] pb-28 font-sans text-zinc-300">
@@ -656,7 +593,7 @@ export default function App() {
           <button
             type="button"
             onClick={() => {
-              window.location.hash = '#/workflow';
+              window.location.href = workflowUrl;
             }}
             className="rounded-full bg-gradient-to-r from-cyan-500 to-indigo-500 px-12 py-4 text-base font-black text-white shadow-xl shadow-cyan-900/40"
           >
