@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useRef, useState } from 'react';
+import React, { useMemo, useRef, useState } from 'react';
 
 const cos = 'https://rock-1392994282.cos.ap-shanghai.myqcloud.com/AI%E4%BA%BA%E7%89%A9%E8%B5%84%E4%BA%A7%E5%BA%93';
 const workflowUrl = 'https://aeye.bytedance.net/flow?id=6a3ca66f4631de0045ef6263';
@@ -147,10 +147,6 @@ export default function App() {
   const [hoverPreview, setHoverPreview] = useState(null);
   const [posePanelOpen, setPosePanelOpen] = useState(false);
   const hoverTimer = useRef(null);
-
-  useEffect(() => {
-    window.location.replace(workflowUrl);
-  }, []);
 
   const updateConfig = (key, value) => setConfig(prev => ({ ...prev, [key]: value }));
 
@@ -597,7 +593,7 @@ export default function App() {
           <button
             type="button"
             onClick={() => {
-              window.location.href = workflowUrl;
+              window.open(workflowUrl, '_blank', 'noopener,noreferrer');
             }}
             className="rounded-full bg-gradient-to-r from-cyan-500 to-indigo-500 px-12 py-4 text-base font-black text-white shadow-xl shadow-cyan-900/40"
           >
