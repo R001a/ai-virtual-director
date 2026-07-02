@@ -1,6 +1,7 @@
 import React, { useMemo, useRef, useState } from 'react';
 
 const cos = 'https://rock-1392994282.cos.ap-shanghai.myqcloud.com/AI%E4%BA%BA%E7%89%A9%E8%B5%84%E4%BA%A7%E5%BA%93';
+const workflowUrl = 'https://aeye.bytedance.net/flow?id=6a3ca66f4631de0045ef6263';
 
 const DATA = {
   models: {
@@ -589,7 +590,13 @@ export default function App() {
         </div>
 
         <div className="mt-10 flex justify-center">
-          <button type="button" className="rounded-full bg-gradient-to-r from-cyan-500 to-indigo-500 px-12 py-4 text-base font-black text-white shadow-xl shadow-cyan-900/40">
+          <button
+            type="button"
+            onClick={() => {
+              window.location.href = workflowUrl;
+            }}
+            className="rounded-full bg-gradient-to-r from-cyan-500 to-indigo-500 px-12 py-4 text-base font-black text-white shadow-xl shadow-cyan-900/40"
+          >
             立即生图
           </button>
         </div>
