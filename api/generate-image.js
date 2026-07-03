@@ -77,7 +77,7 @@ const uploadDataImageToCos = async (dataUrl, index) => {
   const secretKey = process.env.COS_SECRET_KEY;
   const bucket = process.env.COS_BUCKET;
   const region = process.env.COS_REGION || 'ap-shanghai';
-  const publicBaseUrl = process.env.COS_PUBLIC_BASE_URL;
+  const publicBaseUrl = process.env.COS_PUBLIC_BASE_URL?.trim().replace(/\s+/g, '');
   const prefix = (process.env.COS_UPLOAD_PREFIX || 'ai-virtual-director/generated').replace(/^\/+|\/+$/g, '');
 
   if (!secretId || !secretKey || !bucket || !publicBaseUrl) {
