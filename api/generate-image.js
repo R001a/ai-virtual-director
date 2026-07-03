@@ -77,10 +77,9 @@ const uploadDataImageToCos = async (dataUrl, index) => {
   const secretKey = process.env.COS_SECRET_KEY;
   const bucket = process.env.COS_BUCKET;
   const region = process.env.COS_REGION || 'ap-shanghai';
-  const publicBaseUrl = process.env.COS_PUBLIC_BASE_URL?.trim().replace(/\s+/g, '');
   const prefix = (process.env.COS_UPLOAD_PREFIX || 'ai-virtual-director/generated').replace(/^\/+|\/+$/g, '');
 
-  if (!secretId || !secretKey || !bucket || !publicBaseUrl) {
+  if (!secretId || !secretKey || !bucket) {
     throw new Error('Missing COS upload environment variables');
   }
 
@@ -118,7 +117,7 @@ const uploadDataImageToCos = async (dataUrl, index) => {
     throw new Error(`COS 上传失败 (${uploadResponse.status}): ${errorText.slice(0, 300)}`);
   }
 
-  return `${publicBaseUrl.replace(/\/+$/g, '')}/${key.split('/').map(encodeURIComponent).join('/')}`;
+  return url;
 };
 
 export default async function handler(request, response) {
