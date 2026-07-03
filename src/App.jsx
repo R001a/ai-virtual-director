@@ -206,6 +206,7 @@ const summarizeApiResponse = data => {
     .filter(Boolean);
   if (textParts?.length) return textParts.join(' ').slice(0, 500);
   if (data?.error?.message) return data.error.message;
+  if (typeof data?.error === 'string') return data.error;
   return JSON.stringify(data)?.slice(0, 500) || '空响应';
 };
 
@@ -530,7 +531,7 @@ export default function App() {
 
       const data = await parseApiResponse(response);
       if (!response.ok) {
-        throw new Error(data?.error?.message || `API 请求失败 (${response.status})`);
+        throw new Error(data?.error?.message || data?.error || `API 请求失败 (${response.status})`);
       }
       const images = normalizeGeneratedImages(data).map(cleanImageUrl).filter(isImageUrl);
 

@@ -2,6 +2,10 @@ import { createHash, createHmac, randomUUID } from 'node:crypto';
 
 const endpoint = `${process.env.CPASS_BASE_URL || 'https://api.cpass.cc'}/v1beta/models/${process.env.CPASS_GEMINI_IMAGE_MODEL || 'gemini-3-pro-image-preview'}:generateContent`;
 
+const jsonError = (response, status, message, details = {}) => {
+  response.status(status).json({ error: { message, ...details } });
+};
+
 const imageToPart = image => {
   const source = typeof image === 'string' ? image : image?.image;
   if (!source) return null;
@@ -45,7 +49,6 @@ const parseJsonResponse = async apiResponse => {
 
 const hmacSha1 = (key, value, encoding = 'hex') => createHmac('sha1', key).update(value).digest(encoding);
 const sha1 = value => createHash('sha1').update(value).digest('hex');
-
 const encodeCosPath = key => `/${key.split('/').map(encodeURIComponent).join('/')}`;
 
 const createCosAuthorization = ({ method, key, host, mimeType, secretId, secretKey }) => {
@@ -120,7 +123,7 @@ const uploadDataImageToCos = async (dataUrl, index) => {
 
 export default async function handler(request, response) {
   if (request.method !== 'POST') {
-    response.status(405).json({ error: 'Method not allowed' });
+    jsonError(response, 405, 'Method not allowed');
     return;
   }
 
@@ -128,17 +131,19 @@ export default async function handler(request, response) {
     const apiKey = process.env.CPASS_API_KEY;
     const expectedPassword = process.env.GENERATE_PASSWORD || 'rock';
     if (!apiKey) {
-      response.status(500).json({ error: 'Missing CPASS_API_KEY' });
+      jsonError(response, 500, 'Missing CPASS_API_KEY');
       return;
     }
     if (request.body?.password !== expectedPassword) {
-      response.status(401).json({ error: '生图密码错误' });
+      jsonError(response, 401, '生图密码错误');
       return;
     }
 
     const prompt = request.body?.prompt || '';
     const referenceImages = Array.isArray(request.body?.referenceImages) ? request.body.referenceImages : [];
     const imageParts = referenceImages.map(imageToPart).filter(Boolean);
+    const requestedImageSize = process.env.CPASS_IMAGE_SIZE || '2K';
+    const requestedAspectRatio = process.env.CPASS_IMAGE_ASPECT_RATIO || '2:3';
 
     const apiResponse = await fetch(endpoint, {
       method: 'POST',
@@ -159,8 +164,8 @@ export default async function handler(request, response) {
         generationConfig: {
           responseModalities: ['TEXT', 'IMAGE'],
           imageConfig: {
-            aspectRatio: process.env.CPASS_IMAGE_ASPECT_RATIO || '2:3',
-            imageSize: process.env.CPASS_IMAGE_SIZE || '2K',
+            aspectRatio: requestedAspectRatio,
+            imageSize: requestedImageSize,
           },
         },
       }),
@@ -168,14 +173,22 @@ export default async function handler(request, response) {
 
     const data = await parseJsonResponse(apiResponse);
     if (!apiResponse.ok) {
-      response.status(apiResponse.status).json({ error: data?.error?.message || `API 请求失败 (${apiResponse.status})` });
+      jsonError(response, apiResponse.status, data?.error?.message || data?.error || `API 请求失败 (${apiResponse.status})`, {
+        requestedImageSize,
+        requestedAspectRatio,
+      });
       return;
     }
 
     const images = extractImages(data);
     const uploadedImages = await Promise.all(images.map(uploadDataImageToCos));
-    response.status(200).json({ images: uploadedImages, imageCount: uploadedImages.length });
+    response.status(200).json({
+      images: uploadedImages,
+      imageCount: uploadedImages.length,
+      requestedImageSize,
+      requestedAspectRatio,
+    });
   } catch (error) {
-    response.status(500).json({ error: error?.message || '生图失败' });
+    jsonError(response, 500, error?.message || '生图失败');
   }
 }
