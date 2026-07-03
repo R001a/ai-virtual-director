@@ -209,19 +209,51 @@ const summarizeApiResponse = data => {
   return JSON.stringify(data)?.slice(0, 500) || '空响应';
 };
 
+const compressImageDataUrl = (dataUrl, maxSize = 1536, quality = 0.82) => new Promise(resolve => {
+  if (!dataUrl?.startsWith('data:image/')) {
+    resolve(dataUrl);
+    return;
+  }
+  const img = new Image();
+  img.onload = () => {
+    const scale = Math.min(1, maxSize / Math.max(img.width, img.height));
+    const width = Math.max(1, Math.round(img.width * scale));
+    const height = Math.max(1, Math.round(img.height * scale));
+    const canvas = document.createElement('canvas');
+    canvas.width = width;
+    canvas.height = height;
+    const ctx = canvas.getContext('2d');
+    ctx.drawImage(img, 0, 0, width, height);
+    resolve(canvas.toDataURL('image/jpeg', quality));
+  };
+  img.onerror = () => resolve(dataUrl);
+  img.src = dataUrl;
+});
+
 const imageToDataUrl = async imageUrl => {
-  if (!imageUrl || imageUrl.startsWith('data:')) return imageUrl;
+  if (!imageUrl) return imageUrl;
+  if (imageUrl.startsWith('data:')) return compressImageDataUrl(imageUrl);
   const response = await fetch(imageUrl);
   if (!response.ok) {
     throw new Error('参考图读取失败，请检查图片是否可访问');
   }
   const blob = await response.blob();
-  return new Promise((resolve, reject) => {
+  const dataUrl = await new Promise((resolve, reject) => {
     const reader = new FileReader();
     reader.onload = () => resolve(reader.result);
     reader.onerror = reject;
     reader.readAsDataURL(blob);
   });
+  return compressImageDataUrl(dataUrl);
+};
+
+const parseApiResponse = async response => {
+  const text = await response.text();
+  try {
+    return text ? JSON.parse(text) : {};
+  } catch {
+    return { error: { message: text || `API 请求失败 (${response.status})` } };
+  }
 };
 
 const fileToDataUrl = file => new Promise((resolve, reject) => {
@@ -496,7 +528,7 @@ export default function App() {
         }),
       });
 
-      const data = await response.json();
+      const data = await parseApiResponse(response);
       if (!response.ok) {
         throw new Error(data?.error?.message || `API 请求失败 (${response.status})`);
       }

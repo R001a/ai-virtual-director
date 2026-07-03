@@ -5,6 +5,7 @@ dist/
 .pnpm-home/
 .localappdata/
 .appdata/
+publish/
 
 .env
 .env.*
