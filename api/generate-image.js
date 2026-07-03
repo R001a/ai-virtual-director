@@ -1,6 +1,7 @@
 import { createHash, createHmac, randomUUID } from 'node:crypto';
 
 const endpoint = `${process.env.CPASS_BASE_URL || 'https://api.cpass.cc'}/v1beta/models/${process.env.CPASS_GEMINI_IMAGE_MODEL || 'gemini-3-pro-image-preview'}:generateContent`;
+const apiVersion = 'cos-url-from-bucket-v2';
 
 const jsonError = (response, status, message, details = {}) => {
   response.status(status).json({ error: { message, ...details } });
@@ -186,6 +187,7 @@ export default async function handler(request, response) {
       imageCount: uploadedImages.length,
       requestedImageSize,
       requestedAspectRatio,
+      apiVersion,
     });
   } catch (error) {
     jsonError(response, 500, error?.message || '生图失败');
