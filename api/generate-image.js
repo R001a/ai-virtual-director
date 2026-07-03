@@ -56,8 +56,8 @@ const createCosAuthorization = ({ method, key, host, mimeType, secretId, secretK
   const now = Math.floor(Date.now() / 1000);
   const signTime = `${now - 60};${now + 900}`;
   const pathname = `/${key}`;
-  const headerList = 'content-type;host';
-  const headers = `content-type=${encodeURIComponent(mimeType).toLowerCase()}&host=${host}`;
+  const headerList = 'host';
+  const headers = `host=${host}`;
   const httpString = `${method.toLowerCase()}\n${pathname}\n\n${headers}\n`;
   const stringToSign = `sha1\n${signTime}\n${sha1(httpString)}\n`;
   const signKey = hmacSha1(secretKey, signTime);
