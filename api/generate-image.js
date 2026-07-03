@@ -74,10 +74,10 @@ const createCosAuthorization = ({ method, key, host, mimeType, secretId, secretK
 };
 
 const uploadDataImageToCos = async (dataUrl, index) => {
-  const secretId = process.env.COS_SECRET_ID;
-  const secretKey = process.env.COS_SECRET_KEY;
-  const bucket = process.env.COS_BUCKET;
-  const region = process.env.COS_REGION || 'ap-shanghai';
+  const secretId = process.env.COS_SECRET_ID?.trim();
+  const secretKey = process.env.COS_SECRET_KEY?.trim();
+  const bucket = process.env.COS_BUCKET?.trim().replace(/\s+/g, '');
+  const region = (process.env.COS_REGION || 'ap-shanghai').trim().replace(/\s+/g, '');
   const prefix = (process.env.COS_UPLOAD_PREFIX || 'ai-virtual-director/generated').replace(/^\/+|\/+$/g, '');
 
   if (!secretId || !secretKey || !bucket) {
