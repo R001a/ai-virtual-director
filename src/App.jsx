@@ -1,7 +1,108 @@
-import React, { useMemo, useRef, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 
 const cos = 'https://rock-1392994282.cos.ap-shanghai.myqcloud.com/AI%E4%BA%BA%E7%89%A9%E8%B5%84%E4%BA%A7%E5%BA%93';
 const workflowUrl = 'https://aeye.bytedance.net/flow?id=6a3ca66f4631de0045ef6263';
+const STORAGE_KEY = 'ai-virtual-director-draft-v1';
+const IMAGE_DB_NAME = 'ai-virtual-director-images';
+const IMAGE_DB_STORE = 'images';
+const IMAGE_DB_VERSION = 1;
+
+const createInitialConfig = () => ({
+  gender: 'female',
+  model: null,
+  customModel: null,
+  outfitImg: '',
+  propImg: '',
+  outfitPromptText: '',
+  propPromptText: '',
+  poseCat: 'normal',
+  poseId: null,
+  poseImgUrl: '',
+  posePromptText: '',
+  camera: null,
+  expression: null,
+  makeup: null,
+});
+
+const loadDraft = () => {
+  if (typeof window === 'undefined') return null;
+  try {
+    return JSON.parse(window.localStorage.getItem(STORAGE_KEY) || 'null');
+  } catch {
+    return null;
+  }
+};
+
+const openImageDb = () => new Promise((resolve, reject) => {
+  if (typeof window === 'undefined' || !window.indexedDB) {
+    reject(new Error('IndexedDB unavailable'));
+    return;
+  }
+  const request = window.indexedDB.open(IMAGE_DB_NAME, IMAGE_DB_VERSION);
+  request.onupgradeneeded = () => {
+    const db = request.result;
+    if (!db.objectStoreNames.contains(IMAGE_DB_STORE)) {
+      db.createObjectStore(IMAGE_DB_STORE);
+    }
+  };
+  request.onsuccess = () => resolve(request.result);
+  request.onerror = () => reject(request.error);
+});
+
+const imageDbRequest = async (mode, action) => {
+  const db = await openImageDb();
+  return new Promise((resolve, reject) => {
+    const tx = db.transaction(IMAGE_DB_STORE, mode);
+    const store = tx.objectStore(IMAGE_DB_STORE);
+    const request = action(store);
+    request.onsuccess = () => resolve(request.result);
+    request.onerror = () => reject(request.error);
+    tx.oncomplete = () => db.close();
+    tx.onerror = () => {
+      db.close();
+      reject(tx.error);
+    };
+  });
+};
+
+const imageDbGet = key => imageDbRequest('readonly', store => store.get(key)).catch(() => null);
+const imageDbSet = (key, value) => imageDbRequest('readwrite', store => store.put(value, key));
+const imageDbDelete = key => imageDbRequest('readwrite', store => store.delete(key));
+const imageDbClear = () => imageDbRequest('readwrite', store => store.clear()).catch(() => {});
+const isLocalImageData = value => typeof value === 'string' && /^(data:|blob:)/.test(value);
+
+const sanitizeDraftConfig = config => {
+  const next = {
+    ...config,
+    outfitImg: '',
+    propImg: '',
+    poseImgUrl: isLocalImageData(config.poseImgUrl) ? '' : config.poseImgUrl,
+  };
+  if (next.customModel?.refImg) {
+    next.customModel = {
+      ...next.customModel,
+      refImg: isLocalImageData(next.customModel.refImg) ? '' : next.customModel.refImg,
+    };
+  }
+  return next;
+};
+
+const saveImageCache = async (config, generatedImages) => {
+  const entries = [
+    ['config.outfitImg', config.outfitImg],
+    ['config.propImg', config.propImg],
+    ['config.poseImgUrl', isLocalImageData(config.poseImgUrl) ? config.poseImgUrl : ''],
+    ['config.customModel.refImg', config.customModel?.refImg || ''],
+    ['generatedImages', generatedImages],
+  ];
+
+  await Promise.all(entries.map(([key, value]) => {
+    if (Array.isArray(value) ? value.length : value) {
+      return imageDbSet(key, value);
+    }
+    return imageDbDelete(key);
+  }));
+};
 
 const DATA = {
   models: {
@@ -22,7 +123,10 @@ const DATA = {
     { id: 'special', label: '特殊姿势' },
   ],
   poseImages: {
-    normal: [13, 15, 16, 17, 18, 19, 2, 3, 4, 5, 6, 8].map(n => `${cos}/%E4%BA%BA%E7%89%A9%E5%8A%A8%E4%BD%9C/%E5%B8%B8%E8%A7%84/%E7%94%BB%E6%9D%BF%20${n}.jpg`),
+    normal: [
+      ...[13, 15, 16, 17, 18, 19, 2, 3, 4, 5, 6, 8].map(n => `${cos}/%E4%BA%BA%E7%89%A9%E5%8A%A8%E4%BD%9C/%E5%B8%B8%E8%A7%84/%E7%94%BB%E6%9D%BF%20${n}.jpg`),
+      `${cos}/%E4%BA%BA%E7%89%A9%E5%8A%A8%E4%BD%9C/%E5%8A%A8%E6%80%81/%E6%89%93%E7%94%B5%E8%AF%9D.png`,
+    ],
     dynamic: [1, 12, 14, 20, 7, 9].map(n => `${cos}/%E4%BA%BA%E7%89%A9%E5%8A%A8%E4%BD%9C/%E5%8A%A8%E6%80%81/%E7%94%BB%E6%9D%BF%20${n}.jpg`),
     special: [10, 11, 21].map(n => `${cos}/%E4%BA%BA%E7%89%A9%E5%8A%A8%E4%BD%9C/%E7%89%B9%E6%AE%8A/%E7%94%BB%E6%9D%BF%20${n}.jpg`),
   },
@@ -39,23 +143,93 @@ const DATA = {
     { id: 'natural', label: '自然微笑', prompt: '保持人物长相、五官、发型、身材完全不变，仅修改表情，微眯双眼，甜美而调皮的半笑，羞涩的神态，眼神清澈且带有笑意，温柔且具有感染力的笑容，放松且自然的状态。', img: `${cos}/%E5%A6%86%E5%AE%B9%E5%92%8C%E8%A1%A8%E6%83%85/%E8%A1%A8%E6%83%85%E9%83%A8%E5%88%86/%E6%9F%94%E5%92%8C%E5%BE%AE%E7%AC%91.png` },
     { id: 'sunny', label: '阳光笑容', prompt: '保持人物不变，仅修改表情：灿烂且真诚的露齿笑容，充满感染力的开怀大笑，自然真实感，眼神明亮充满光泽，直视镜头，表情自然且愉悦，散发出自信与活泼的青春气息，面部表情放松，毫无造作感。', img: `${cos}/%E5%A6%86%E5%AE%B9%E5%92%8C%E8%A1%A8%E6%83%85/%E8%A1%A8%E6%83%85%E9%83%A8%E5%88%86/%E9%98%B3%E5%85%89%E7%AC%91%E5%AE%B9.png` },
     { id: 'relax', label: '思考松弛', prompt: '保持人物不变，仅修改表情：眼神迷离且带有淡淡的慵懒感，看向远方，面部表情松弛，没有刻意的肌肉用力，呈现出一种若有所思、漫不经心或空灵的氛围感，仿佛刚从沉思中惊醒，带有明显的胶片电影质感。', img: `${cos}/%E5%A6%86%E5%AE%B9%E5%92%8C%E8%A1%A8%E6%83%85/%E8%A1%A8%E6%83%85%E9%83%A8%E5%88%86/%E6%80%9D%E8%80%83%E6%9D%BE%E5%BC%9B.png` },
-    { id: 'focus', label: '神采奕奕', prompt: '保持人物不变，仅修改表情：慵懒，漫不经心，清纯、空灵、无辜感、眼神清澈且微带湿润、直视镜头、面部表情平和自然、微张的双唇透露出一点点慵懒与纯真、神态静谧柔和、自然光线下柔和的皮肤质感，冷静而带有疏离感', img: `${cos}/%E5%A6%86%E5%AE%B9%E5%92%8C%E8%A1%A8%E6%83%85/%E8%A1%A8%E6%83%85%E9%83%A8%E5%88%86/%E4%B8%93%E6%B3%A8%E5%87%9D%E8%A7%86.png` },
-    { id: 'playful', label: '灵动俏皮', prompt: '保持人物不变，仅修改表情：眼神清澈且带着微微笑意（眯眼笑），嘴角微微上扬，眼神柔和清澈而灵动，透着一丝俏皮与放松。头部略微向侧面倾斜，看向镜头，展现出一种随意的亲和力。整体神态既有初恋般的清纯感，又不失活泼的趣味。', img: `${cos}/%E5%A6%86%E5%AE%B9%E5%92%8C%E8%A1%A8%E6%83%85/%E8%A1%A8%E6%83%85%E9%83%A8%E5%88%86/%E4%B8%93%E6%B3%A8%E5%87%9D%E8%A7%86.png` },
-    { id: 'interactive', label: '轻松互动', prompt: '仅修改表情。人物仿佛刚刚听到镜头外有人说话，目光自然看向对方方向，眼神带有轻微交流感和回应感。面部自然放松，嘴角微微上扬，似笑非笑。头部轻微侧转或轻微歪头，整体状态轻松、真实、生活化，具有杂志抓拍摄影中的自然互动感。', img: `${cos}/%E5%A6%86%E5%AE%B9%E5%92%8C%E8%A1%A8%E6%83%85/%E8%A1%A8%E6%83%85%E9%83%A8%E5%88%86/%E4%B8%93%E6%B3%A8%E5%87%9D%E8%A7%86.png` },
+    { id: 'focus', label: '神采奕奕', prompt: '保持人物不变，仅修改表情：慵懒，漫不经心，清纯、空灵、无辜感、眼神清澈且微带湿润、直视镜头、面部表情平和自然、微张的双唇透露出一点点慵懒与纯真、神态静谧柔和、自然光线下柔和的皮肤质感，冷静而带有疏离感', img: `${cos}/%E5%A6%86%E5%AE%B9%E5%92%8C%E8%A1%A8%E6%83%85/%E8%A1%A8%E6%83%85%E9%83%A8%E5%88%86/%E7%A5%9E%E9%87%87%E5%A5%95%E5%A5%95%E6%96%B0.png` },
+    { id: 'playful', label: '灵动俏皮', prompt: '保持人物不变，仅修改表情：眼神清澈且带着微微笑意（眯眼笑），嘴角微微上扬，眼神柔和清澈而灵动，透着一丝俏皮与放松。头部略微向侧面倾斜，看向镜头，展现出一种随意的亲和力。整体神态既有初恋般的清纯感，又不失活泼的趣味。', img: `${cos}/%E5%A6%86%E5%AE%B9%E5%92%8C%E8%A1%A8%E6%83%85/%E8%A1%A8%E6%83%85%E9%83%A8%E5%88%86/%E7%81%B5%E5%8A%A8%E4%BF%8F%E7%9A%AE%E6%96%B0.png` },
+    { id: 'interactive', label: '轻松互动', prompt: '仅修改表情。人物仿佛刚刚听到镜头外有人说话，目光自然看向对方方向，眼神带有轻微交流感和回应感。面部自然放松，嘴角微微上扬，似笑非笑。头部轻微侧转或轻微歪头，整体状态轻松、真实、生活化，具有杂志抓拍摄影中的自然互动感。', img: `${cos}/%E5%A6%86%E5%AE%B9%E5%92%8C%E8%A1%A8%E6%83%85/%E8%A1%A8%E6%83%85%E9%83%A8%E5%88%86/%E8%BD%BB%E6%9D%BE%E4%BA%92%E5%8A%A8.png` },
   ],
   makeup: [
     { id: 'nude', label: '自然裸妆', prompt: '极简自然素颜妆，干净透亮的皮肤，保留真实细腻的毛孔纹理，无明显妆感，伪素颜，饱满良好的精神状态，眼神清澈明亮，野生自然眉，裸色水润双唇，面色红润健康，清新自然的气质，柔和的晨间自然光，干净极简背景，写实人像摄影，逼真的光影效果。', img: `${cos}/%E5%A6%86%E5%AE%B9%E5%92%8C%E8%A1%A8%E6%83%85/%E5%A6%86%E5%AE%B9%E9%83%A8%E5%88%86/%E8%87%AA%E7%84%B6%E8%A3%B8%E5%A6%86.png` },
     { id: 'fresh', label: '清透元气妆', prompt: '肤质通透细腻，轻薄底妆，自然水光肌效果，双颊增加淡粉色腮红，位置偏苹果肌，眼周轻微提亮，睫毛自然纤长，浅棕色自然眼妆，眼神清透有神，增加元气感，唇部为自然蜜桃粉色，嘴唇带轻微水润光泽，整体妆感干净轻盈，清淡妆容，不改变人物五官与气质。', img: `${cos}/%E5%A6%86%E5%AE%B9%E5%92%8C%E8%A1%A8%E6%83%85/%E5%A6%86%E5%AE%B9%E9%83%A8%E5%88%86/%E6%B8%85%E9%80%8F%E5%85%83%E6%B0%94%E5%A6%86.png` },
     { id: 'refined', label: '精致妆容', prompt: '鼻梁与双颊大面积自然泛红，腮红横跨鼻梁与苹果肌，保留真实皮肤纹理，眼妆极淡，仅轻微提亮，上下睫毛自然浓密，唇部为裸杏色哑光口红，整体妆感年轻、健康、充满生命力。', img: `${cos}/%E5%A6%86%E5%AE%B9%E5%92%8C%E8%A1%A8%E6%83%85/%E5%A6%86%E5%AE%B9%E9%83%A8%E5%88%86/%E7%B2%BE%E8%87%B4%E6%97%B6%E5%B0%9A.png` },
-    { id: 'trend', label: '个性潮流妆', prompt: '鼻梁与双颊大面积自然泛红，腮红横跨鼻梁与苹果肌，保留真实皮肤纹理，眼妆极淡，仅轻微提亮，上下睫毛自然浓密，唇部为裸杏色哑光口红，整体妆感年轻、健康、充满生命力。', img: `${cos}/%E5%A6%86%E5%AE%B9%E5%92%8C%E8%A1%A8%E6%83%85/%E5%A6%86%E5%AE%B9%E9%83%A8%E5%88%86/%E7%B2%BE%E8%87%B4%E6%97%B6%E5%B0%9A.png` },
-    { id: 'nomakeup', label: '自然素颜', prompt: '极致清晰的脸部特写肖像，完美的自然裸妆，清透轻薄底妆，自然毛流感野生眉，低饱和度哑光裸色唇妆，极具真实的皮肤质感状态，保留微小毛孔与细腻肌肤纹理，原生清透美感，伪素颜，柔和的自然光照明，极简高级审美，8k分辨率，超写实微距摄影质感。', img: `${cos}/%E5%A6%86%E5%AE%B9%E5%92%8C%E8%A1%A8%E6%83%85/%E5%A6%86%E5%AE%B9%E9%83%A8%E5%88%86/%E8%87%AA%E7%84%B6%E8%A3%B8%E5%A6%86.png` },
-    { id: 'editorial', label: '时尚大片妆', prompt: '面部轮廓更加清晰立体，保留男性骨相特征，下颌线更加干净利落，鼻梁立体度轻微提升，肤质细腻干净，去除瑕疵但保留真实皮肤纹理，眉毛自然整理，眼周轻微提亮，唇色自然健康，不增加明显眼影，不增加明显眼线，时尚杂志封面、高级品牌广告感觉。', img: `${cos}/%E5%A6%86%E5%AE%B9%E5%92%8C%E8%A1%A8%E6%83%85/%E5%A6%86%E5%AE%B9%E9%83%A8%E5%88%86/%E6%97%B6%E5%B0%9A%E5%A4%A7%E7%89%87%E5%A6%86.png` },
+    { id: 'trend', label: '个性潮流妆', prompt: '鼻梁与双颊大面积自然泛红，腮红横跨鼻梁与苹果肌，保留真实皮肤纹理，眼妆极淡，仅轻微提亮，上下睫毛自然浓密，唇部为裸杏色哑光口红，整体妆感年轻、健康、充满生命力。', img: `${cos}/%E5%A6%86%E5%AE%B9%E5%92%8C%E8%A1%A8%E6%83%85/%E5%A6%86%E5%AE%B9%E9%83%A8%E5%88%86/%E4%B8%AA%E6%80%A7%E6%BD%AE%E6%B5%81%E5%A6%86.png` },
+    { id: 'nomakeup', label: '自然素颜', prompt: '极致清晰的脸部特写肖像，完美的自然裸妆，清透轻薄底妆，自然毛流感野生眉，低饱和度哑光裸色唇妆，极具真实的皮肤质感状态，保留微小毛孔与细腻肌肤纹理，原生清透美感，伪素颜，柔和的自然光照明，极简高级审美，8k分辨率，超写实微距摄影质感。', img: `${cos}/%E5%A6%86%E5%AE%B9%E5%92%8C%E8%A1%A8%E6%83%85/%E5%A6%86%E5%AE%B9%E9%83%A8%E5%88%86/%E8%87%AA%E7%84%B6%E8%A3%B8%E5%A6%86-%E7%94%B7.png` },
+    { id: 'editorial', label: '时尚大片妆', prompt: '面部轮廓更加清晰立体，保留男性骨相特征，下颌线更加干净利落，鼻梁立体度轻微提升，肤质细腻干净，去除瑕疵但保留真实皮肤纹理，眉毛自然整理，眼周轻微提亮，唇色自然健康，不增加明显眼影，不增加明显眼线，时尚杂志封面、高级品牌广告感觉。', img: `${cos}/%E5%A6%86%E5%AE%B9%E5%92%8C%E8%A1%A8%E6%83%85/%E5%A6%86%E5%AE%B9%E9%83%A8%E5%88%86/%E6%97%B6%E5%B0%9A%E5%A4%A7%E7%89%87%E5%A6%86-%E7%94%B7.png` },
   ],
 };
 
-const isImageUrl = value => typeof value === 'string' && /^(https?:|blob:|data:)/.test(value);
+const extractDataImages = value => {
+  if (typeof value !== 'string') return [];
+  return value.match(/data:image\/[a-zA-Z0-9.+-]+;base64,[A-Za-z0-9+/=]+/g) || [];
+};
+
+const cleanImageUrl = value => {
+  if (typeof value !== 'string') return '';
+  const extracted = extractDataImages(value);
+  if (extracted.length) return extracted[0];
+  return value.trim().replace(/^[("'\s]+|[)"'\s]+$/g, '');
+};
+
+const isImageUrl = value => /^(https?:|blob:|data:)/.test(cleanImageUrl(value));
 const maleMakeupIds = ['nomakeup', 'editorial'];
 const isMakeupAllowed = (gender, makeupId) => gender === 'male' ? maleMakeupIds.includes(makeupId) : !maleMakeupIds.includes(makeupId);
+
+const normalizeGeneratedImages = data => {
+  if (Array.isArray(data)) return data.map(cleanImageUrl).filter(Boolean);
+  const geminiImages = data?.candidates?.flatMap(candidate => candidate?.content?.parts || []).flatMap(part => {
+    const inline = part.inline_data || part.inlineData;
+    const file = part.file_data || part.fileData;
+    if (inline?.data) {
+      const mimeType = inline.mime_type || inline.mimeType || 'image/png';
+      return [`data:${mimeType};base64,${inline.data}`];
+    }
+    if (file?.file_uri || file?.fileUri) {
+      return [file.file_uri || file.fileUri];
+    }
+    if (part.text) {
+      return extractDataImages(part.text);
+    }
+    return [];
+  }) || [];
+  if (geminiImages.length) return geminiImages;
+  if (Array.isArray(data?.images)) return data.images.map(cleanImageUrl).filter(Boolean);
+  if (Array.isArray(data?.data?.images)) return data.data.images.map(cleanImageUrl).filter(Boolean);
+  if (typeof data?.image === 'string') return [cleanImageUrl(data.image)];
+  if (typeof data?.url === 'string') return [cleanImageUrl(data.url)];
+  if (typeof data?.data?.url === 'string') return [cleanImageUrl(data.data.url)];
+  if (typeof data?.base64 === 'string') return [`data:image/png;base64,${data.base64}`];
+  return extractDataImages(JSON.stringify(data));
+};
+
+const summarizeApiResponse = data => {
+  const textParts = data?.candidates?.flatMap(candidate => candidate?.content?.parts || [])
+    .map(part => part.text)
+    .filter(Boolean);
+  if (textParts?.length) return textParts.join(' ').slice(0, 500);
+  if (data?.error?.message) return data.error.message;
+  return JSON.stringify(data)?.slice(0, 500) || '空响应';
+};
+
+const imageToDataUrl = async imageUrl => {
+  if (!imageUrl || imageUrl.startsWith('data:')) return imageUrl;
+  const response = await fetch(imageUrl);
+  if (!response.ok) {
+    throw new Error('参考图读取失败，请检查图片是否可访问');
+  }
+  const blob = await response.blob();
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(reader.result);
+    reader.onerror = reject;
+    reader.readAsDataURL(blob);
+  });
+};
+
+const fileToDataUrl = file => new Promise((resolve, reject) => {
+  const reader = new FileReader();
+  reader.onload = () => resolve(reader.result);
+  reader.onerror = reject;
+  reader.readAsDataURL(file);
+});
 
 function SectionCard({ step, title, children }) {
   return (
@@ -112,7 +286,7 @@ function FaceOption({ item, active, color, disabled = false, onClick, onPreview,
       type="button"
       disabled={disabled}
       onClick={onClick}
-      className={`min-w-[220px] rounded-xl border bg-zinc-900 p-3 text-left transition ${disabled ? 'cursor-not-allowed opacity-35 grayscale' : 'hover:border-zinc-500'} ${active ? activeClass : 'border-zinc-800 text-zinc-400'}`}
+      className={`min-w-[220px] rounded-xl border bg-zinc-900 p-3 text-left transition ${disabled ? 'cursor-not-allowed opacity-55' : 'hover:border-zinc-500'} ${active ? activeClass : 'border-zinc-800 text-zinc-400'}`}
     >
       <div
         onMouseEnter={event => !disabled && onPreview(item.img, event)}
@@ -127,28 +301,76 @@ function FaceOption({ item, active, color, disabled = false, onClick, onPreview,
 }
 
 export default function App() {
-  const [config, setConfig] = useState({
-    gender: 'female',
-    model: null,
-    customModel: null,
-    outfitImg: '',
-    propImg: '',
-    outfitPromptText: '',
-    propPromptText: '',
-    poseCat: 'normal',
-    poseId: null,
-    poseImgUrl: '',
-    posePromptText: '',
-    camera: null,
-    expression: null,
-    makeup: null,
-  });
+  const [config, setConfig] = useState(() => ({ ...createInitialConfig(), ...(loadDraft()?.config || {}) }));
   const [zoom, setZoom] = useState(null);
   const [hoverPreview, setHoverPreview] = useState(null);
   const [posePanelOpen, setPosePanelOpen] = useState(false);
+  const [generatedImages, setGeneratedImages] = useState(() => loadDraft()?.generatedImages || []);
+  const [outputCursor, setOutputCursor] = useState(() => loadDraft()?.outputCursor || 0);
+  const [isGenerating, setIsGenerating] = useState(false);
+  const [generationStatus, setGenerationStatus] = useState('');
+  const [generationError, setGenerationError] = useState('');
+  const [cacheReady, setCacheReady] = useState(false);
   const hoverTimer = useRef(null);
 
+  useEffect(() => {
+    let active = true;
+    Promise.all([
+      imageDbGet('config.outfitImg'),
+      imageDbGet('config.propImg'),
+      imageDbGet('config.poseImgUrl'),
+      imageDbGet('config.customModel.refImg'),
+      imageDbGet('generatedImages'),
+    ]).then(([outfitImg, propImg, poseImgUrl, customModelRefImg, cachedGeneratedImages]) => {
+      if (!active) return;
+      setConfig(prev => ({
+        ...prev,
+        outfitImg: outfitImg || prev.outfitImg,
+        propImg: propImg || prev.propImg,
+        poseImgUrl: poseImgUrl || prev.poseImgUrl,
+        customModel: prev.customModel && customModelRefImg
+          ? { ...prev.customModel, refImg: customModelRefImg }
+          : prev.customModel,
+      }));
+      if (Array.isArray(cachedGeneratedImages)) {
+        setGeneratedImages(cachedGeneratedImages);
+      }
+    }).finally(() => {
+      if (active) setCacheReady(true);
+    });
+    return () => {
+      active = false;
+    };
+  }, []);
+
+  useEffect(() => {
+    if (!cacheReady) return;
+    try {
+      window.localStorage.setItem(STORAGE_KEY, JSON.stringify({
+        config: sanitizeDraftConfig(config),
+        generatedImages: [],
+        outputCursor,
+      }));
+      saveImageCache(config, generatedImages).catch(() => {
+        setGenerationError('浏览器图片缓存写入失败，部分图片可能无法在刷新后保留');
+      });
+    } catch (error) {
+      setGenerationError('浏览器本地存储空间不足，部分图片可能无法在刷新后保留');
+    }
+  }, [cacheReady, config, generatedImages, outputCursor]);
+
   const updateConfig = (key, value) => setConfig(prev => ({ ...prev, [key]: value }));
+
+  const clearConfig = () => {
+    window.localStorage.removeItem(STORAGE_KEY);
+    imageDbClear();
+    setConfig(createInitialConfig());
+    setGeneratedImages([]);
+    setOutputCursor(0);
+    setGenerationStatus('');
+    setGenerationError('');
+    setZoom(null);
+  };
 
   const setGender = gender => {
     setConfig(prev => ({
@@ -163,23 +385,24 @@ export default function App() {
     }));
   };
 
-  const uploadImage = (key, event) => {
+  const uploadImage = async (key, event) => {
     const file = event.target.files?.[0];
     if (!file) return;
-    updateConfig(key, URL.createObjectURL(file));
+    updateConfig(key, await fileToDataUrl(file));
     event.target.value = '';
   };
 
-  const uploadCustomModel = event => {
+  const uploadCustomModel = async event => {
     const file = event.target.files?.[0];
     if (!file) return;
+    const refImg = await fileToDataUrl(file);
     setConfig(prev => ({
       ...prev,
       model: null,
       customModel: {
         id: 'custom',
         name: 'Custom Role',
-        refImg: URL.createObjectURL(file),
+        refImg,
         gender: prev.gender,
         shotType: 'full',
         fileName: file.name,
@@ -188,13 +411,14 @@ export default function App() {
     event.target.value = '';
   };
 
-  const uploadCustomPose = event => {
+  const uploadCustomPose = async event => {
     const file = event.target.files?.[0];
     if (!file) return;
+    const poseImgUrl = await fileToDataUrl(file);
     setConfig(prev => ({
       ...prev,
       poseId: 'custom-upload',
-      poseImgUrl: URL.createObjectURL(file),
+      poseImgUrl,
     }));
     event.target.value = '';
   };
@@ -228,10 +452,85 @@ export default function App() {
     link.remove();
   };
 
+  const handleGenerate = async () => {
+    if (isGenerating) return;
+    if (!config.outfitImg) {
+      setGenerationError('请先添加服饰参考图');
+      setGenerationStatus('');
+      return;
+    }
+
+    const referenceImages = await Promise.all(promptData.chain
+      .filter(ref => ref.hasData)
+      .map(async (ref, index) => ({
+        index: index + 1,
+        type: ref.id,
+        label: ref.label,
+        image: await imageToDataUrl(ref.img),
+      })));
+
+    setIsGenerating(true);
+    setGenerationError('');
+    setGenerationStatus('正在上传参考图并生成，请稍候');
+
+    try {
+      let password = window.sessionStorage.getItem('ai-virtual-director-password') || '';
+      if (!password) {
+        password = window.prompt('请输入生图密码') || '';
+        if (password) {
+          window.sessionStorage.setItem('ai-virtual-director-password', password);
+        }
+      }
+      if (!password) {
+        throw new Error('请输入生图密码');
+      }
+
+      const response = await fetch('/api/generate-image', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          password,
+          prompt: promptData.main,
+          referenceImages,
+          imageCount: 1,
+        }),
+      });
+
+      const data = await response.json();
+      if (!response.ok) {
+        throw new Error(data?.error?.message || `API 请求失败 (${response.status})`);
+      }
+      const images = normalizeGeneratedImages(data).map(cleanImageUrl).filter(isImageUrl);
+
+      if (!images.length) {
+        throw new Error(`API 未返回可展示的图片：${summarizeApiResponse(data)}`);
+      }
+
+      const startCursor = outputCursor;
+      setGeneratedImages(prev => {
+        const next = [...prev].slice(0, 3);
+        let cursor = startCursor;
+        images.forEach(img => {
+          next[cursor % 3] = img;
+          cursor += 1;
+        });
+        return next;
+      });
+      setOutputCursor((startCursor + images.length) % 3);
+      setGenerationStatus('生成完成');
+    } catch (error) {
+      setGenerationError(error?.message || '生图失败，请重试');
+      setGenerationStatus('');
+    } finally {
+      setIsGenerating(false);
+    }
+  };
+
   const promptData = useMemo(() => {
     const character = config.model || config.customModel;
     const genderName = config.gender === 'female' ? '女生' : '男生';
     const shotType = character?.shotType === 'half' ? '半身像' : '全身像';
+    const shotTypeDetails = character?.shotType === 'half' ? '，特写角色上半身胸像，腰部以上，不露出下半身' : '';
     const expression = config.expression || DATA.expressions.find(item => item.id === 'natural');
     const defaultMakeupId = config.gender === 'male' ? 'nomakeup' : 'nude';
     const makeup = config.makeup || DATA.makeup.find(item => item.id === defaultMakeupId);
@@ -242,16 +541,21 @@ export default function App() {
     const propDetails = config.propPromptText.trim() || '按道具参考图提取外观、材质、颜色与握持关系';
     const poseDetails = config.posePromptText.trim() || '保持商业新品营销画面的自然、舒展与高级感';
 
-    const main = [
-      `完全参考图1的角色特征，发型特征，这是一个${genderName}的${shotType}。`,
+    const mainParts = [
+      `完全参考图1的角色特征，发型特征，这是一个${genderName}的${shotType}${shotTypeDetails}。`,
       `角色身穿图2的服饰，服饰特征为：${outfitDetails}。`,
       `姿势摆成参考图3的姿势，严格参考图3的动作和拍摄角度，对动作的微调为：${poseDetails}。`,
-      `手拿图4的道具，${propDetails}。`,
       `角色的面部特征为${expression.label}（${expression.prompt}）。`,
       `妆容为${makeup.label}（${makeup.prompt}）。`,
       `摄像机机位为：${camera.label}，${camera.prompt}。`,
       '专业棚拍布光，柔和且均匀的正面主平光，面部光线干净无强烈阴影，浅灰色背景，整体明亮通透，背景带有淡淡的人物自然投影，高质量商业打光，服装材质纹理清晰，高对比鲜明色调，色彩干净明快，中长焦镜头，极高分辨率，8K画质，超精细细节，锐利对焦，照片级真实感，不要有AI感和塑料感，固定画面为竖版2:3比例。'
-    ].join(' ');
+    ];
+
+    if (config.propImg) {
+      mainParts.splice(3, 0, `手拿或者穿戴图4的道具，${propDetails}。`);
+    }
+
+    const main = mainParts.join(' ');
 
     const chain = [
       { id: 'model', label: '模特参考', img: character?.refImg, desc: character ? `${genderName} / ${shotType}` : '暂未配置' },
@@ -271,6 +575,13 @@ export default function App() {
         .custom-scrollbar::-webkit-scrollbar-track { background: #111217; border-radius: 999px; }
         .custom-scrollbar::-webkit-scrollbar-thumb { background: #3f3f46; border-radius: 999px; }
         .custom-scrollbar::-webkit-scrollbar-thumb:hover { background: #06b6d4; }
+        .loading-dot { animation: loading-dot 1s infinite ease-in-out; }
+        .loading-dot:nth-child(2) { animation-delay: 0.14s; }
+        .loading-dot:nth-child(3) { animation-delay: 0.28s; }
+        @keyframes loading-dot {
+          0%, 80%, 100% { transform: translateY(0); opacity: 0.35; }
+          40% { transform: translateY(-8px); opacity: 1; }
+        }
       `}</style>
 
       <header className="border-b border-zinc-900 bg-[#101116] py-5 text-center">
@@ -346,46 +657,7 @@ export default function App() {
           </div>
         </SectionCard>
 
-        <SectionCard step="2" title="服饰与道具 (Styling & Props)">
-          <div className="grid grid-cols-1 gap-5 md:grid-cols-2">
-            <UploadTile
-              label="上传服饰参考图 (Garment)"
-              value={config.outfitImg}
-              onUpload={event => uploadImage('outfitImg', event)}
-              onClear={() => updateConfig('outfitImg', '')}
-              tall
-            />
-            <UploadTile
-              label="上传道具参考图 (Props)"
-              value={config.propImg}
-              onUpload={event => uploadImage('propImg', event)}
-              onClear={() => updateConfig('propImg', '')}
-              tall
-            />
-          </div>
-          <div className="mt-6 space-y-4">
-            <label className="block text-sm font-semibold text-zinc-400">
-              服饰提示词补充
-              <input
-                value={config.outfitPromptText}
-                onChange={event => updateConfig('outfitPromptText', event.target.value)}
-                className="mt-2 w-full rounded-lg border border-zinc-800 bg-zinc-950 px-4 py-3 text-sm text-zinc-200 outline-none focus:border-cyan-500"
-                placeholder="例如：白色无袖连衣裙、棉麻质感、极简廓形..."
-              />
-            </label>
-            <label className="block text-sm font-semibold text-zinc-400">
-              道具提示词补充
-              <input
-                value={config.propPromptText}
-                onChange={event => updateConfig('propPromptText', event.target.value)}
-                className="mt-2 w-full rounded-lg border border-zinc-800 bg-zinc-950 px-4 py-3 text-sm text-zinc-200 outline-none focus:border-cyan-500"
-                placeholder="例如：手拿新品香水瓶，瓶身透明玻璃，高级反光..."
-              />
-            </label>
-          </div>
-        </SectionCard>
-
-        <SectionCard step="3" title="姿势与镜头 (默认站立姿态)">
+        <SectionCard step="2" title="姿势与镜头 (默认站立姿态)">
           <div className="mb-4 flex items-center justify-between gap-4">
             <div className="text-sm font-semibold text-zinc-400">动作特征大类（可展开子图库）</div>
             <button
@@ -488,6 +760,45 @@ export default function App() {
           )}
         </SectionCard>
 
+        <SectionCard step="3" title="服饰与道具 (Styling & Props)">
+          <div className="grid grid-cols-1 gap-5 md:grid-cols-2">
+            <UploadTile
+              label="上传服饰参考图 (Garment)"
+              value={config.outfitImg}
+              onUpload={event => uploadImage('outfitImg', event)}
+              onClear={() => updateConfig('outfitImg', '')}
+              tall
+            />
+            <UploadTile
+              label="上传道具参考图 (Props)"
+              value={config.propImg}
+              onUpload={event => uploadImage('propImg', event)}
+              onClear={() => updateConfig('propImg', '')}
+              tall
+            />
+          </div>
+          <div className="mt-6 space-y-4">
+            <label className="block text-sm font-semibold text-zinc-400">
+              服饰提示词补充
+              <input
+                value={config.outfitPromptText}
+                onChange={event => updateConfig('outfitPromptText', event.target.value)}
+                className="mt-2 w-full rounded-lg border border-zinc-800 bg-zinc-950 px-4 py-3 text-sm text-zinc-200 outline-none focus:border-cyan-500"
+                placeholder="例如：白色无袖连衣裙、棉麻质感、极简廓形..."
+              />
+            </label>
+            <label className="block text-sm font-semibold text-zinc-400">
+              道具提示词补充
+              <input
+                value={config.propPromptText}
+                onChange={event => updateConfig('propPromptText', event.target.value)}
+                className="mt-2 w-full rounded-lg border border-zinc-800 bg-zinc-950 px-4 py-3 text-sm text-zinc-200 outline-none focus:border-cyan-500"
+                placeholder="例如：左手拿咖啡，头部戴上墨镜。"
+              />
+            </label>
+          </div>
+        </SectionCard>
+
         <SectionCard step="4" title="面部特征 (Expression & Makeup)">
           <div className="mb-4 flex items-end justify-between">
             <h3 className="text-sm font-semibold text-zinc-400">表情状态（不选默认自然微笑）</h3>
@@ -534,8 +845,12 @@ export default function App() {
 
         <div className="mt-12 mb-6 flex items-center justify-between border-b border-zinc-800 pb-4">
           <h2 className="text-xl font-bold text-zinc-200">最终视觉资产列阵 (Output)</h2>
-          <button type="button" className="rounded-lg bg-gradient-to-r from-cyan-600 to-indigo-600 px-6 py-2.5 text-sm font-bold text-white shadow-lg shadow-cyan-900/30">
-            刷新参数
+          <button
+            type="button"
+            onClick={clearConfig}
+            className="rounded-lg border border-zinc-700 bg-zinc-900 px-6 py-2.5 text-sm font-bold text-zinc-300 shadow-lg transition hover:border-red-500/70 hover:text-red-300"
+          >
+            清空配置
           </button>
         </div>
 
@@ -589,28 +904,90 @@ export default function App() {
           <div className="whitespace-pre-wrap p-6 font-mono text-sm leading-7 text-zinc-300">{promptData.main}</div>
         </div>
 
-        <div className="mt-10 flex justify-center">
+        <div className="mt-10 flex flex-col items-center gap-3">
+          <div className="grid w-full max-w-md grid-cols-1 gap-4 sm:grid-cols-2">
+            <button
+              type="button"
+              disabled={isGenerating}
+              onClick={handleGenerate}
+              className={`rounded-full px-8 py-4 text-base font-black text-white shadow-xl transition ${isGenerating ? 'cursor-not-allowed bg-zinc-700 text-zinc-400 shadow-none' : 'bg-gradient-to-r from-cyan-500 to-indigo-500 shadow-cyan-900/40 hover:scale-[1.02]'}`}
+            >
+              {isGenerating ? '生图中...' : '立即生图'}
+            </button>
           <button
             type="button"
             onClick={() => {
               window.open(workflowUrl, '_blank', 'noopener,noreferrer');
             }}
-            className="rounded-full bg-gradient-to-r from-cyan-500 to-indigo-500 px-12 py-4 text-base font-black text-white shadow-xl shadow-cyan-900/40"
+              className="rounded-full border border-zinc-700 bg-zinc-900 px-8 py-4 text-base font-black text-zinc-300 transition hover:border-cyan-500 hover:text-cyan-300"
           >
-            立即生图
+              跳转工作流
           </button>
+          </div>
+          {(generationStatus || generationError) && (
+            <div className={`text-sm ${generationError ? 'text-red-400' : 'text-cyan-300'}`}>
+              {generationError || generationStatus}
+            </div>
+          )}
         </div>
 
         <div className="mx-auto mt-10 grid w-full grid-cols-1 gap-10 md:grid-cols-3 xl:gap-12">
-          {[1, 2, 3].map(i => (
-            <div key={i} className="flex aspect-[2/3] w-full flex-col items-center justify-center rounded-2xl border border-zinc-800/80 bg-[#0f1115] text-zinc-600 shadow-2xl">
-              <span className="mb-2 text-3xl">▧</span>
-              <span className="font-mono text-xs tracking-widest">CANVAS 0{i}</span>
-              <span className="mt-1 text-xs">AI output preview area</span>
+          {[0, 1, 2].map(index => {
+            const img = generatedImages[index];
+            return (
+            <div key={index} className="relative flex aspect-[2/3] w-full flex-col items-center justify-center overflow-hidden rounded-2xl border border-zinc-800/80 bg-[#0f1115] text-zinc-600 shadow-2xl">
+              {img ? (
+                <>
+                  <button
+                    type="button"
+                    onClick={() => setZoom({ img, level: 1 })}
+                    className="h-full w-full"
+                  >
+                    <img src={img} alt={`CANVAS 0${index + 1}`} className="h-full w-full object-cover" />
+                  </button>
+                  {isGenerating && (
+                    <div className="absolute inset-x-0 top-0 flex items-center justify-center gap-2 bg-black/55 py-3 text-xs font-bold text-cyan-300 backdrop-blur">
+                      <span>正在生成</span>
+                      <span className="loading-dot h-1.5 w-1.5 rounded-full bg-cyan-300" />
+                      <span className="loading-dot h-1.5 w-1.5 rounded-full bg-cyan-300" />
+                      <span className="loading-dot h-1.5 w-1.5 rounded-full bg-cyan-300" />
+                    </div>
+                  )}
+                  <button
+                    type="button"
+                    onClick={() => downloadImage(img, `canvas-0${index + 1}`)}
+                    className="absolute bottom-4 left-1/2 -translate-x-1/2 rounded-full border border-zinc-700 bg-black/75 px-4 py-2 text-xs font-bold text-zinc-200 backdrop-blur hover:border-cyan-500 hover:text-cyan-300"
+                  >
+                    下载图片
+                  </button>
+                </>
+              ) : isGenerating ? (
+                <>
+                  <div className="mb-5 flex h-10 items-center gap-2">
+                    <span className="loading-dot h-3 w-3 rounded-full bg-cyan-400" />
+                    <span className="loading-dot h-3 w-3 rounded-full bg-cyan-400" />
+                    <span className="loading-dot h-3 w-3 rounded-full bg-cyan-400" />
+                  </div>
+                  <span className="font-mono text-xs tracking-widest text-cyan-500">CANVAS 0{index + 1}</span>
+                  <span className="mt-2 text-xs text-zinc-500">正在生成</span>
+                </>
+              ) : (
+                <>
+                  <span className="mb-2 text-3xl">▧</span>
+                  <span className="font-mono text-xs tracking-widest">CANVAS 0{index + 1}</span>
+                  <span className="mt-1 text-xs">AI output preview area</span>
+                </>
+              )}
             </div>
-          ))}
+          );})}
         </div>
       </main>
+
+      {generationError && !isGenerating && (
+        <div className="fixed left-1/2 top-6 z-[999997] -translate-x-1/2 rounded-full border border-red-500/40 bg-red-950/90 px-5 py-3 text-sm font-bold text-red-100 shadow-2xl shadow-red-950/40 backdrop-blur">
+          {generationError}
+        </div>
+      )}
 
       {hoverPreview && (
         <div

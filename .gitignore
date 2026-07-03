@@ -1,6 +1,10 @@
 node_modules/
 dist/
 .pnpm-store/
+.cache/
+.pnpm-home/
+.localappdata/
+.appdata/
 
 .env
 .env.*
