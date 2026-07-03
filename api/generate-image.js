@@ -55,7 +55,7 @@ const encodeCosPath = key => `/${key.split('/').map(encodeURIComponent).join('/'
 const createCosAuthorization = ({ method, key, host, mimeType, secretId, secretKey }) => {
   const now = Math.floor(Date.now() / 1000);
   const signTime = `${now - 60};${now + 900}`;
-  const pathname = encodeCosPath(key);
+  const pathname = `/${key}`;
   const headerList = 'content-type;host';
   const headers = `content-type=${encodeURIComponent(mimeType).toLowerCase()}&host=${host}`;
   const httpString = `${method.toLowerCase()}\n${pathname}\n\n${headers}\n`;
