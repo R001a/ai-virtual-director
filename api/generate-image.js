@@ -181,6 +181,13 @@ export default async function handler(request, response) {
     }
 
     const images = extractImages(data);
+    if (!images.length) {
+      jsonError(response, 502, 'CPASS did not return a usable image', {
+        requestedImageSize,
+        requestedAspectRatio,
+      });
+      return;
+    }
     const uploadedImages = await Promise.all(images.map(uploadDataImageToCos));
     response.status(200).json({
       images: uploadedImages,

@@ -165,6 +165,9 @@ const extractImages = data => {
     if (file?.file_uri || file?.fileUri) {
       return [file.file_uri || file.fileUri];
     }
+    if (part.text) {
+      return part.text.match(/data:image\/[a-zA-Z0-9.+-]+;base64,[A-Za-z0-9+/=]+/g) || [];
+    }
     return [];
   });
 };
