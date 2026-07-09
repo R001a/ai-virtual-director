@@ -191,7 +191,7 @@ export default async function handler(request, response) {
     const prompt = request.body?.prompt || '';
     const referenceImages = Array.isArray(request.body?.referenceImages) ? request.body.referenceImages : [];
     const imageParts = referenceImages.map(imageToPart).filter(Boolean);
-    const requestedImageSize = '2K';
+    const requestedImageSize = '4K';
     const requestedAspectRatio = process.env.CPASS_IMAGE_ASPECT_RATIO || '2:3';
 
     const apiResponse = await fetch(endpoint, {
