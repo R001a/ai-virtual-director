@@ -210,7 +210,7 @@ const summarizeApiResponse = data => {
   return JSON.stringify(data)?.slice(0, 500) || '空响应';
 };
 
-const compressImageDataUrl = (dataUrl, maxSize = 1536, quality = 0.82) => new Promise(resolve => {
+const compressImageDataUrl = (dataUrl, maxSize = 2304, quality = 0.86) => new Promise(resolve => {
   if (!dataUrl?.startsWith('data:image/')) {
     resolve(dataUrl);
     return;
