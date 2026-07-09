@@ -39,6 +39,54 @@ const extractImages = data => {
   });
 };
 
+const getPngDimensions = buffer => {
+  if (buffer.length < 24 || buffer.toString('ascii', 1, 4) !== 'PNG') return null;
+  return {
+    width: buffer.readUInt32BE(16),
+    height: buffer.readUInt32BE(20),
+  };
+};
+
+const getJpegDimensions = buffer => {
+  let offset = 2;
+  while (offset < buffer.length) {
+    if (buffer[offset] !== 0xff) return null;
+    const marker = buffer[offset + 1];
+    const length = buffer.readUInt16BE(offset + 2);
+    if (marker >= 0xc0 && marker <= 0xcf && ![0xc4, 0xc8, 0xcc].includes(marker)) {
+      return {
+        height: buffer.readUInt16BE(offset + 5),
+        width: buffer.readUInt16BE(offset + 7),
+      };
+    }
+    offset += 2 + length;
+  }
+  return null;
+};
+
+const getImageDimensions = dataUrl => {
+  const match = dataUrl.match(/^data:([^;]+);base64,(.+)$/);
+  if (!match) return null;
+  const buffer = Buffer.from(match[2], 'base64');
+  if (match[1].includes('png')) return getPngDimensions(buffer);
+  if (match[1].includes('jpeg') || match[1].includes('jpg')) return getJpegDimensions(buffer);
+  return null;
+};
+
+const selectLargestImages = images => {
+  const measured = images.map((image, index) => {
+    const dimensions = getImageDimensions(image);
+    const area = dimensions ? dimensions.width * dimensions.height : 0;
+    return { image, index, dimensions, area };
+  });
+  const maxArea = Math.max(...measured.map(item => item.area));
+  if (maxArea <= 0) return images;
+  return measured
+    .filter(item => item.area === maxArea)
+    .sort((a, b) => a.index - b.index)
+    .map(item => item.image);
+};
+
 const parseJsonResponse = async apiResponse => {
   const text = await apiResponse.text();
   try {
@@ -188,10 +236,12 @@ export default async function handler(request, response) {
       });
       return;
     }
-    const uploadedImages = await Promise.all(images.map(uploadDataImageToCos));
+    const selectedImages = selectLargestImages(images);
+    const uploadedImages = await Promise.all(selectedImages.map(uploadDataImageToCos));
     response.status(200).json({
       images: uploadedImages,
       imageCount: uploadedImages.length,
+      rawImageCount: images.length,
       requestedImageSize,
       requestedAspectRatio,
       apiVersion,
