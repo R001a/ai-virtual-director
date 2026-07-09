@@ -81,10 +81,11 @@ const selectLargestImages = images => {
   });
   const maxArea = Math.max(...measured.map(item => item.area));
   if (maxArea <= 0) return images;
-  return measured
+  const largest = measured
     .filter(item => item.area === maxArea)
     .sort((a, b) => a.index - b.index)
     .map(item => item.image);
+  return largest.slice(0, 1);
 };
 
 const parseJsonResponse = async apiResponse => {
