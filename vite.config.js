@@ -221,7 +221,7 @@ export default defineConfig(({ mode }) => {
                   responseModalities: ['TEXT', 'IMAGE'],
                   imageConfig: {
                     aspectRatio: env.CPASS_IMAGE_ASPECT_RATIO || '2:3',
-                    imageSize: env.CPASS_IMAGE_SIZE || '2K',
+                    imageSize: '2K',
                   },
                 },
               };
